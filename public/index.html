@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Consultancy</title>
+    <style>
+        /* General page styling */
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #f4f7fc;
+            color: #333;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 {
+            font-size: 36px;
+            color: #0056b3;
+            margin-top: 20px;
+        }
+
+        #videoContainer {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 20px 0;
+            border: 2px solid #0056b3;
+            padding: 10px;
+            background-color: #fff;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        video {
+            width: 350px;
+            height: auto;
+            border-radius: 8px;
+            border: 2px solid #0056b3;
+            margin: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        #localVideo {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 150px;
+            border: 2px solid #e57373;
+        }
+
+        button {
+            padding: 10px 20px;
+            background-color: #0056b3;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 10px;
+        }
+
+        button:hover {
+            background-color: #004494;
+        }
+
+        input {
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            font-size: 16px;
+            margin: 10px;
+            width: 300px;
+        }
+
+        #socketIdDisplay {
+            margin-top: 20px;
+            font-size: 18px;
+            color: #333;
+            background-color: #e1f5fe;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #81d4fa;
+            width: 400px;
+            text-align: center;
+        }
+
+        #socketIdDisplay span {
+            font-weight: bold;
+            color: #0056b3;
+        }
+
+        @media (max-width: 768px) {
+            video {
+                width: 250px;
+            }
+
+            #localVideo {
+                width: 100px;
+            }
+
+            button, input {
+                width: 90%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Video Consultancy</h1>
+    <div id="videoContainer">
+        <video id="remoteVideo" autoplay></video>
+        <video id="localVideo" autoplay muted></video>
+    </div>
+    <button id="startButton">Start Consultation</button>
+    <input type="text" id="peerId" placeholder="Enter Peer ID to connect" />
+    <button id="connectButton">Connect</button>
+
+    <!-- Element to display the socket ID -->
+    <div id="socketIdDisplay">Your Socket ID: <span id="socketId"></span></div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const connectButton = document.getElementById('connectButton');
+        const socketIdDisplay = document.getElementById('socketId');
+        let localStream;
+        let peerConnection;
+
+        const configuration = {
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+        };
+
+        document.getElementById('startButton').onclick = startConsultation;
+        connectButton.onclick = connectToPeer;
+
+        // Display the socket ID when connected
+        socket.on('connect', () => {
+            socketIdDisplay.textContent = socket.id; // Show the socket ID
+        });
+
+        async function startConsultation() {
+            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            localVideo.srcObject = localStream;
+        }
+
+        async function connectToPeer() {
+            const peerId = document.getElementById('peerId').value; // Get the Peer ID entered by the user
+            if (!localStream) {
+                alert('Please start the consultation first!');
+                return;
+            }
+
+            // Create a peer connection
+            peerConnection = new RTCPeerConnection(configuration);
+
+            // Add local stream tracks to the peer connection
+            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+            // Handle incoming tracks
+            peerConnection.ontrack = (event) => {
+                remoteVideo.srcObject = event.streams[0]; // Display the remote video stream
+            };
+
+            // Handle ICE candidates
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit('signal', { to: peerId, signal: event.candidate }); // Send ICE candidate to the peer
+                }
+            };
+
+            // Create an offer and set local description
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            socket.emit('signal', { to: peerId, signal: offer }); // Send the offer to the specified peer
+        }
+
+        socket.on('signal', async (data) => {
+            if (data.signal) {
+                if (data.signal.sdp) {
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.signal));
+                    const answer = await peerConnection.createAnswer();
+                    await peerConnection.setLocalDescription(answer);
+                    socket.emit('signal', { to: data.from, signal: answer });
+                } else {
+                    await peerConnection.addIceCandidate(new RTCIceCandidate(data.signal));
+                }
+            }
+        });
+    </script>
+</body>
+</html>
